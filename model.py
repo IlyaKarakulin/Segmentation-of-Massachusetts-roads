@@ -128,7 +128,7 @@ class Segmentator():
         self.pin_memory = True
 
     def train(self, path_to_train: str, path_to_val: str, num_epoch=100, batch_size=64, acc_step=1, lr=0.001):
-        log_dir = f'meta_data/HRNet/Deep_bs={batch_size}*{acc_step}_res=1500_(1,2,2,2)'
+        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res=1200_(1,2,2,2)'
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir)
 
@@ -193,9 +193,9 @@ class Segmentator():
 
         epoch_loss = 0.0
         all_iou_scores = []
-        total_samples = 0  # Счетчик общего числа обработанных семплов
+        total_samples = 0 
         
-        # Для накопления градиентов
+       
         accumulated_steps = 0
         
         progress_bar = tqdm(dataloader, desc=f"{epoch_num+1}", leave=is_train, ncols=100)
@@ -207,37 +207,37 @@ class Segmentator():
             total_samples += batch_size
 
             if is_train:
-                # Прямой проход
+               
                 with torch.set_grad_enabled(True):
                     predictions = self.model(x_batch)
                     loss_bce = criterion_bce(predictions, y_batch)
                     loss_dice = criterion_dice(predictions, y_batch)
-                    loss_unscaled = loss_bce + loss_dice  # Неделенный лосс
+                    loss_unscaled = loss_bce + loss_dice 
                     
-                    # Масштабируем лосс для аккумуляции градиентов
+                   
                     loss = loss_unscaled / acc_step
                     loss.backward()
                     
                     accumulated_steps += 1
 
-                # Обновление весов при достижении шага аккумуляции
+               
                 if accumulated_steps % acc_step == 0 or i == len(dataloader) - 1:
-                    # Клиппинг перед обновлением
+                   
                     nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     optimizer.step()
                     optimizer.zero_grad()
                     
-                    # Сбрасываем счетчик только после обновления
+                   
                     accumulated_steps = 0
             else:
-                # Для валидации - без градиентов
+               
                 with torch.no_grad():
                     predictions = self.model(x_batch)
                     loss_bce = criterion_bce(predictions, y_batch)
                     loss_dice = criterion_dice(predictions, y_batch)
                     loss_unscaled = loss_bce + loss_dice
 
-            # Расчет IoU (общий для train/val)
+           
             with torch.no_grad():
                 probs = torch.sigmoid(predictions)
                 preds_binary = (probs > 0.5).float()
@@ -249,13 +249,13 @@ class Segmentator():
                 iou_batch = (intersection + smooth_iou) / (union + smooth_iou)
                 all_iou_scores.extend(iou_batch.cpu().tolist())
 
-            # Для лосса используем НЕмасштабированное значение
+           
             epoch_loss += loss_unscaled.item() * batch_size
             
             if is_train:
                 progress_bar.set_postfix(loss=f"{loss_unscaled.item():.4f}")
         
-        # Расчет средних метрик
+       
         avg_epoch_loss = epoch_loss / total_samples
         metrics = {f"{mode_str}_Loss": avg_epoch_loss}
 
