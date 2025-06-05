@@ -3,7 +3,7 @@ from config import update_config
 from config import CONF
 
 path_to_model = './meta_data/models/best.pth'
-path_to_test = './data/val'
+path_to_test = './data_tiff/test'
 
 update_config(CONF, "./config.yaml")
 

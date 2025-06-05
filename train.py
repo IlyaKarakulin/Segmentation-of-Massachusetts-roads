@@ -17,11 +17,11 @@ path_to_val = './data_tiff/val'
 update_config(CONF, "./config.yaml")
 
 
-model = Segmentator('cuda:1', CONF)
+model = Segmentator('cuda:3', CONF)
 
 model.train(path_to_train=path_to_train,
             path_to_val=path_to_val,
-            batch_size=4,
+            batch_size=8,
             lr=0.005,
-            acc_step=2,
+            acc_step=1,
             num_epoch=100) 
