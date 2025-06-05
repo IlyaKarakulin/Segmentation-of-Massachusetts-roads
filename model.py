@@ -133,7 +133,7 @@ class Segmentator():
 
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=6)
 
-        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res={segment_dataset.size}_(1,4,3,0)_Focal_gamma={gamma}, alpha={alpha}'
+        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res={segment_dataset.size}_(1,2,0,0)_Focal_gamma={gamma}, alpha={alpha}'
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir)
         # self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -254,8 +254,8 @@ class Segmentator():
                     
                     y_pred = (y_pred > 0.5).astype(np.uint8)
 
-                    precision_arr.append(precision_score(y_true, y_pred))
-                    recall_arr.append(recall_score(y_true, y_pred))
+                    precision_arr.append(precision_score(y_true, y_pred, zero_division=True))
+                    recall_arr.append(recall_score(y_true, y_pred, zero_division=True))
 
            
             epoch_loss += loss_unscaled.item() * batch_size
@@ -321,15 +321,17 @@ class Segmentator():
         self.model.eval()
         all_ious = []
 
-        hook_list = []
         with torch.no_grad():
             for batch_idx, (x_batch, y_batch) in enumerate(tqdm(test_loader, desc="Testing", ncols=100)):
                 x_batch = x_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
 
-                # y_batch = F.interpolate(y_batch, size=(x_batch.size(2), x_batch.size(3)), mode='bilinear', align_corners=None)
-
                 predictions, x1, x2, x3, x4 = self.model(x_batch)
+                # print()
+                # print(x1.size())
+                # print(x2.size())
+                # print(x3.size())
+                # print(x4.size())
 
                 probs = torch.sigmoid(predictions)
                 preds_binary = (probs > 0.05)
@@ -340,39 +342,108 @@ class Segmentator():
                 all_ious.extend(iou.cpu().tolist())
         
                 if batch_idx < 10:
-                    self.visualize_batch(x_batch, y_batch, preds_binary, save_path=os.path.join(save_dir, f"batch_{batch_idx}.png"))
+                    self.visualize_all_outputs(
+                        x_batch, 
+                        y_batch, 
+                        preds_binary,
+                        [x1, x2, x3, x4],
+                        save_path=os.path.join(save_dir, f"batch_{batch_idx}.png")
+                    )
 
         mean_iou = np.mean(all_ious)
         print(f"Mean IoU on test: {mean_iou:.4f}")
 
-        return hook_list
+        return []
 
-    def visualize_batch(self, x_batch, y_batch, preds_binary, save_path=None, num_examples=4):
+    def visualize_all_outputs(self, x_batch, y_batch, final_pred, intermediates, save_path=None, num_examples=4):
         batch_size = min(x_batch.size(0), num_examples)
-        fig, axs = plt.subplots(batch_size, 3, figsize=(15, 3 * batch_size))
+        num_layers = len(intermediates) + 3
+        
+        fig, axs = plt.subplots(batch_size, num_layers, figsize=(4*num_layers, 4*batch_size))
+        
         if batch_size == 1:
             axs = [axs]
+        
+        layer_names = ["Input", "Ground Truth", "Final Prediction"] + [f"Layer {i+1}" for i in range(len(intermediates))]
+        
         for i in range(batch_size):
+            # Оригинальное изображение
             img = x_batch[i].detach().cpu()
             img = TF.to_pil_image(img)
-            gt = y_batch[i, 0].detach().cpu().numpy()
-            pr = preds_binary[i, 0].detach().cpu().numpy()
-
             axs[i][0].imshow(img)
-            axs[i][0].set_title('Input')
+            axs[i][0].set_title(layer_names[0])
             axs[i][0].axis('off')
-
+            
+            # Ground Truth
+            gt = y_batch[i, 0].detach().cpu().numpy()
             axs[i][1].imshow(gt, cmap='gray')
-            axs[i][1].set_title('Ground Truth')
+            axs[i][1].set_title(layer_names[1])
             axs[i][1].axis('off')
-
+            
+            # Финальный prediction
+            pr = final_pred[i, 0].detach().cpu().numpy()
             axs[i][2].imshow(pr, cmap='gray')
-            axs[i][2].set_title('Prediction')
+            axs[i][2].set_title(layer_names[2])
             axs[i][2].axis('off')
 
+
+            x1 = intermediates[0][i, 0].detach().cpu().numpy()
+            axs[i][3].imshow(x1, cmap='gray')
+            axs[i][3].set_title(layer_names[3])
+            axs[i][3].axis('off')
+
+            x2 = intermediates[1][i, 0].detach().cpu().numpy()
+            axs[i][4].imshow(x2, cmap='gray')
+            axs[i][4].set_title(layer_names[4])
+            axs[i][4].axis('off')
+
+            x3 = intermediates[2][i, 0].detach().cpu().numpy()
+            axs[i][5].imshow(x3, cmap='gray')
+            axs[i][5].set_title(layer_names[5])
+            axs[i][5].axis('off')
+
+            x4 = intermediates[3][i, 0].detach().cpu().numpy()
+            axs[i][6].imshow(x4, cmap='gray')
+            axs[i][6].set_title(layer_names[6])
+            axs[i][6].axis('off')
+            
+            
+        
         plt.tight_layout()
         if save_path:
-            plt.savefig(save_path)
+            plt.savefig(save_path, bbox_inches='tight')
             plt.close(fig)
         else:
             plt.show()
+
+    # def visualize_batch(self, x_batch, y_batch, preds_binary, save_path=None, num_examples=4):
+    #     batch_size = min(x_batch.size(0), num_examples)
+    #     fig, axs = plt.subplots(batch_size, 3, figsize=(15, 3 * batch_size))
+        
+    #     if batch_size == 1:
+    #         axs = [axs]
+        
+    #     for i in range(batch_size):
+    #         img = x_batch[i].detach().cpu()
+    #         img = TF.to_pil_image(img)
+    #         gt = y_batch[i, 0].detach().cpu().numpy()
+    #         pr = preds_binary[i, 0].detach().cpu().numpy()
+
+    #         axs[i][0].imshow(img)
+    #         axs[i][0].set_title('Input')
+    #         axs[i][0].axis('off')
+
+    #         axs[i][1].imshow(gt, cmap='gray')
+    #         axs[i][1].set_title('Ground Truth')
+    #         axs[i][1].axis('off')
+
+    #         axs[i][2].imshow(pr, cmap='gray')
+    #         axs[i][2].set_title('Prediction')
+    #         axs[i][2].axis('off')
+
+    #     plt.tight_layout()
+    #     if save_path:
+    #         plt.savefig(save_path)
+    #         plt.close(fig)
+    #     else:
+    #         plt.show()

@@ -450,21 +450,25 @@ class HighResolutionNet(nn.Module):
         x = self.stage4(x_list)
 
         # Upsampling
-        # x0_h, x0_w = x[0].size(2), x[0].size(3)
         x0_h, x0_w = x[0].size(2), x[0].size(3)
         
         x1 = F.interpolate(x[1], size=(x0_h, x0_w), mode='bilinear', align_corners=ALIGN_CORNERS)
         x2 = F.interpolate(x[2], size=(x0_h, x0_w), mode='bilinear', align_corners=ALIGN_CORNERS)
         x3 = F.interpolate(x[3], size=(x0_h, x0_w), mode='bilinear', align_corners=ALIGN_CORNERS)
 
+        # print()
+        # print(x[0].size())
+        # print(x1.size())
+        # print(x2.size())
+        # print(x3.size())
+
+        # x0 = x[0]
+
         x = torch.cat([x[0], x1, x2, x3], 1)
-        # x = torch.cat([x[0], x1, x2], 1)
-
         x = self.last_layer(x)
-
         mask = F.interpolate(x, size=(self.in_size_x, self.in_size_y), mode='bilinear', align_corners=ALIGN_CORNERS)
 
-        return mask, x[0], x1, x2, x3
+        return mask #, x0, x1, x2, x3
 
     def init_weights(self, pretrained='',):
         logger.info('=> init weights from normal distribution')
