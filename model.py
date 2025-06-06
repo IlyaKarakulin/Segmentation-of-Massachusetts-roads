@@ -35,37 +35,6 @@ class SoftDiceLoss(nn.Module):
         score = 1 - score.sum() / num
 
         return score
-    
-# class SoftIoULoss(nn.Module):
-#     def __init__(self, smooth=1):
-#         super().__init__()
-#         self.smooth = smooth
-
-#     def forward(self, logits, targets):
-#         num = targets.size(0)
-#         probs = torch.sigmoid(logits)
-#         m1 = probs.view(num, -1)
-#         m2 = targets.view(num, -1)
-#         intersection = (m1 * m2)
-
-#         score = (intersection.sum(1) + self.smooth) / (m1.sum(1) + m2.sum(1) - intersection.sum(1) + self.smooth)
-#         score = 1 - score.sum() / num
-#         return score
-    
-
-# class BoundaryLoss (nn.Module):
-#     def __init__(self):
-#         super().__init__()
-
-#     def forward(self, logits, sdm):
-#         probs = torch.sigmoid(logits)
-#         clipped_sdm = torch.relu(sdm)
-
-#         norm = clipped_sdm.mean(dim=[2,3], keepdim=True) + 1e-6
-#         weighted = probs * clipped_sdm / norm
-
-#         score = weighted.mean()
-#         return score
 
 
 class FocalLoss(nn.Module):
@@ -133,7 +102,7 @@ class Segmentator():
 
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=6)
 
-        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res={segment_dataset.size}_(1,2,0,0)_Focal_gamma={gamma}, alpha={alpha}'
+        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res={segment_dataset.size}_(2,4,0,0)_Focal_gamma={gamma}, alpha={alpha}_new_aug'
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir)
         # self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
