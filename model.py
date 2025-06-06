@@ -65,7 +65,6 @@ class Segmentator():
         self.model.train()
         best_val_iou = 0.0
 
-
         for count_epoch in range(num_epoch):
             train_metrics = self.run_epoch(count_epoch, dataloader_train, self.optimizer, loss, acc_step, is_train=True)
             val_metrics = self.run_epoch(count_epoch, dataloader_val, None, loss, acc_step, is_train=False)
@@ -146,7 +145,7 @@ class Segmentator():
             recall_arr = []
            
             with torch.no_grad():
-                probs = torch.sigmoid(predictions[0])
+                probs = predictions[0]
                 preds_binary = (probs > 0.5).float()
                 
                 intersection = (preds_binary * y_batch).sum(dim=[1,2,3])
@@ -237,20 +236,19 @@ class Segmentator():
                 x_batch = x_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
 
-                predictions, x1, x2, x3, x4 = self.model(x_batch)
+                probs, x1, x2, x3, x4 = self.model(x_batch)
                 # print()
-                # print(x1.size())
+                # print(probs)
                 # print(x2.size())
                 # print(x3.size())
                 # print(x4.size())
 
-                probs = torch.sigmoid(predictions)
                 preds_binary = (probs > 0.5)
 
-                intersection = (preds_binary * y_batch).sum(dim=[1, 2, 3])
-                union = preds_binary.sum(dim=[1, 2, 3]) + y_batch.sum(dim=[1, 2, 3]) - intersection
-                iou = (intersection + 1e-6) / (union + 1e-6)
-                all_ious.extend(iou.cpu().tolist())
+                # intersection = (preds_binary * y_batch).sum(dim=[1, 2, 3])
+                # union = preds_binary.sum(dim=[1, 2, 3]) + y_batch.sum(dim=[1, 2, 3]) - intersection
+                # iou = (intersection + 1e-6) / (union + 1e-6)
+                # all_ious.extend(iou.cpu().tolist())
         
                 if batch_idx < 10:
                     self.visualize_all_outputs(

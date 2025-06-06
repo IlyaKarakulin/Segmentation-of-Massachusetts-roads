@@ -227,14 +227,11 @@ class Decoder(nn.Module):
     def __init__(self, in_channels):
         super(Decoder, self).__init__()
         
-        # Transposed convolution для увеличения разрешения с H/2×W/2 до H×W
-        self.transpose_conv = nn.ConvTranspose2d(in_channels, in_channels//8, 
-                                               kernel_size=4, stride=2, padding=1)
+        self.transpose_conv = nn.ConvTranspose2d(in_channels, in_channels // 8, kernel_size=4, stride=2, padding=1)
         
-        # Три последовательные свертки для уменьшения каналов
-        self.conv1 = nn.Conv2d(in_channels//8, in_channels//16, 3, padding=1)
-        self.conv2 = nn.Conv2d(in_channels//16, in_channels//32, 3, padding=1)
-        self.conv3 = nn.Conv2d(in_channels//32, 1, 3, padding=1)
+        self.conv1 = nn.Conv2d(in_channels // 8, in_channels // 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(in_channels // 16, in_channels // 32, 3, padding=1)
+        self.conv3 = nn.Conv2d(in_channels // 32, 1, 3, padding=1)
         
         self.sigmoid = nn.Sigmoid()
         
@@ -290,8 +287,6 @@ class MSSDMPA_Net(nn.Module):
         self.decoder = Decoder(total_channels)
         
     def forward(self, x):
-        # Сохраняем промежуточные результаты
-        # encoder_features = []
         prob_maps = []
         damip_outputs = []
         damsca_outputs = []
@@ -310,8 +305,6 @@ class MSSDMPA_Net(nn.Module):
             
             # Encoder обрабатывает выход DAMIP (или g1 для первого пути)
             features, prob_map = self.encoders[i](current_damip_out)
-            
-            # encoder_features.append(features)
             prob_maps.append(prob_map)
             
             # DAMSCA повышает разрешение
@@ -324,10 +317,10 @@ class MSSDMPA_Net(nn.Module):
         # Decoder генерирует финальную карту сегментации
         mout = self.decoder(fdec)
         # print()
-        # print("!!!!", damsca_outputs[0].size())
+        # print("!!!!", mout)
 
-        return mout, damsca_outputs[0], damsca_outputs[1], damsca_outputs[2], damsca_outputs[3]
-        # return mout, prob_maps[0], prob_maps[1], prob_maps[2], prob_maps[3]
+        # return mout, damsca_outputs[0], damsca_outputs[1], damsca_outputs[2], damsca_outputs[3]
+        return mout, prob_maps[0], prob_maps[1], prob_maps[2], prob_maps[3]
     
 
 # if __name__ == "__main__":

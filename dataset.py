@@ -91,7 +91,7 @@ class MassachusettsRoadsDataset(data.Dataset):
         
         img = TVImage(img)
         mask = TVMask(mask)
-        
+
         if self.mode == 'train':
             img, mask = self.joint_transforms(img, mask)
             img = self.color_transforms(img)
