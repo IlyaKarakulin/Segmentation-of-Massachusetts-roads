@@ -13,62 +13,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score
 
-from dataset import SegmentDataset
-from seg_hrnet import HighResolutionNet
-
-
-class SoftDiceLoss(nn.Module):
-    def __init__(self, smooth=1):
-        super().__init__()
-        self.smooth = smooth
-
-    def forward(self, logits, targets):
-        num = targets.size(0)
-        probs = torch.sigmoid(logits)
-
-        m1 = probs.view(num, -1)
-        m2 = targets.view(num, -1)
-
-        intersection = (m1 * m2)
-
-        score = 2 * (intersection.sum(1) + self.smooth) / (m1.sum(1) + m2.sum(1) + self.smooth)
-        score = 1 - score.sum() / num
-
-        return score
-
-
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=0.8):
-        super().__init__()
-        self.gamma = gamma
-        self.alpha = alpha  # Вес для положительного класса (дороги)
-
-    def forward(self, logits, targets):
-        bce_loss = F.binary_cross_entropy_with_logits(
-            logits, targets, reduction='none'
-        )
-        
-        probs = torch.sigmoid(logits)
-        pt = torch.where(targets == 1, probs, 1 - probs)
-        focal_weight = (1 - pt) ** self.gamma
-        
-        # Балансировка классов
-        alpha_weight = torch.where(
-            targets == 1, 
-            self.alpha, 
-            1 - self.alpha
-        )
-        
-        focal_loss = alpha_weight * focal_weight * bce_loss
-        return focal_loss.mean()
-
+from dataset import MassachusettsRoadsDataset
+from mmsdmpaNet import MSSDMPA_Net
+from loss import MSSDMPALoss
 
 
 class Segmentator():
-    def __init__(self, device='cpu', conf=None):
+    def __init__(self, device='cpu'):
         self.device = device
        
-        self.model = HighResolutionNet(conf).to(self.device)
+        self.model = MSSDMPA_Net(input_channels=3, base_channels=64).to(self.device)
 
         def count_parameters(model):
             return sum(p.numel() for p in model.parameters())
@@ -80,31 +34,28 @@ class Segmentator():
         self.num_workers = 6
         self.pin_memory = True
 
+
     def train(self, path_to_train: str, path_to_val: str, num_epoch=100, batch_size=64, acc_step=1, lr=0.001):
 
-        segment_dataset = SegmentDataset(path_to_train, 'train')
+        segment_dataset = MassachusettsRoadsDataset(path_to_train, 'train')
         dataloader_train = data.DataLoader(segment_dataset, batch_size=batch_size, shuffle=True, 
                                            num_workers=self.num_workers, pin_memory=self.pin_memory)
         
-        segment_val = SegmentDataset(path_to_val, 'val')
+        segment_val = MassachusettsRoadsDataset(path_to_val, 'val')
         dataloader_val = data.DataLoader(segment_val, batch_size=1, shuffle=False,
                                           num_workers=self.num_workers, pin_memory=self.pin_memory)
         
 
         self.optimizer = optim.AdamW(params=self.model.parameters(), lr=lr, weight_decay=0)
 
-        gamma = 2
-        alpha = 0.8
-        loss_1 = FocalLoss(gamma, alpha)
-
-        # loss_1 = nn.BCEWithLogitsLoss()
-        loss_2 = SoftDiceLoss()
+        loss = MSSDMPALoss()
 
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=6)
 
-        log_dir = f'meta_data/HRNet/bs={batch_size}*{acc_step}_res={segment_dataset.size}_(2,4,0,0)_Focal_gamma={gamma}, alpha={alpha}_new_aug'
+        log_dir = f'meta_data/HRNet/MSSDMPA_Net-bs={batch_size}*{acc_step}'
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir)
+
         # self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         #     self.optimizer,
         #     T_max=num_epoch,
@@ -116,10 +67,8 @@ class Segmentator():
 
 
         for count_epoch in range(num_epoch):
-            train_metrics = self.run_epoch(count_epoch, dataloader_train, self.optimizer, loss_1, loss_2, acc_step, is_train=True)
-            val_metrics = self.run_epoch(count_epoch, dataloader_val, None, loss_1, loss_2, acc_step, is_train=False)
-            # train_metrics = self.run_epoch(count_epoch, dataloader_train, self.optimizer, loss_1, None, acc_step, is_train=True)
-            # val_metrics = self.run_epoch(count_epoch, dataloader_val, None, loss_1, None, acc_step, is_train=False)
+            train_metrics = self.run_epoch(count_epoch, dataloader_train, self.optimizer, loss, acc_step, is_train=True)
+            val_metrics = self.run_epoch(count_epoch, dataloader_val, None, loss, acc_step, is_train=False)
 
             self.scheduler.step(val_metrics['Val_Loss'])
             current_lr = self.optimizer.param_groups[0]['lr']
@@ -146,7 +95,8 @@ class Segmentator():
 
         self.writer.close()
 
-    def run_epoch(self, epoch_num, dataloader, optimizer, loss1, loss2, acc_step, is_train=True):
+
+    def run_epoch(self, epoch_num, dataloader, optimizer, criterion, acc_step, is_train=True):
         if is_train:
             self.model.train()
             mode_str = "Train"
@@ -165,6 +115,9 @@ class Segmentator():
         for i, (x_batch, y_batch) in enumerate(progress_bar):
             x_batch = x_batch.to(self.device, non_blocking=self.pin_memory)
             y_batch = y_batch.to(self.device, non_blocking=self.pin_memory)
+
+            # print(y_batch.size())
+
             batch_size = x_batch.size(0)
             total_samples += batch_size
 
@@ -172,16 +125,8 @@ class Segmentator():
                
                 with torch.set_grad_enabled(True):
                     predictions = self.model(x_batch)
-                    loss1_value = loss1(predictions, y_batch)
-
-                    if loss2:
-                        loss2_value = loss2(predictions, y_batch)
-                    else:
-                        loss2_value = 0
-
-                    loss_unscaled = loss1_value + loss2_value 
-                    
-                    loss = loss_unscaled / acc_step
+                    loss_value = criterion(predictions, y_batch)                    
+                    loss = loss_value / acc_step
                     loss.backward()
                     accumulated_steps += 1
 
@@ -195,19 +140,13 @@ class Segmentator():
                
                 with torch.no_grad():
                     predictions = self.model(x_batch)
-                    loss1_value = loss1(predictions, y_batch)
-
-                    if loss2:
-                        loss2_value = loss2(predictions, y_batch)
-                    else:
-                        loss2_value = 0
-                    loss_unscaled = loss1_value + loss2_value
+                    loss_value = criterion(predictions, y_batch)
 
             precision_arr = []
             recall_arr = []
            
             with torch.no_grad():
-                probs = torch.sigmoid(predictions)
+                probs = torch.sigmoid(predictions[0])
                 preds_binary = (probs > 0.5).float()
                 
                 intersection = (preds_binary * y_batch).sum(dim=[1,2,3])
@@ -226,11 +165,10 @@ class Segmentator():
                     precision_arr.append(precision_score(y_true, y_pred, zero_division=True))
                     recall_arr.append(recall_score(y_true, y_pred, zero_division=True))
 
-           
-            epoch_loss += loss_unscaled.item() * batch_size
+            epoch_loss += loss_value.item() * batch_size
             
             if is_train:
-                progress_bar.set_postfix(loss=f"{loss_unscaled.item():.4f}")
+                progress_bar.set_postfix(loss=f"{loss_value.item():.4f}")
         
        
         avg_epoch_loss = epoch_loss / total_samples
@@ -245,12 +183,14 @@ class Segmentator():
         
         return metrics    
     
+
     def __log_metrics(self, train_metrics, val_metrics, epoch):
         for metric, value in train_metrics.items():
             self.writer.add_scalar(f'Train/{metric.split("_")[1]}', value, epoch)
 
         for metric, value in val_metrics.items():
             self.writer.add_scalar(f'Val/{metric.split("_")[1]}', value, epoch)
+
 
     def __save_model(self, name):
         model_dir = './meta_data/models'
@@ -265,6 +205,7 @@ class Segmentator():
 
         torch.save(state, model_path)
 
+
     def load_model(self, path_to_checkpoint):
         if not os.path.exists(path_to_checkpoint):
             print(f"Checkpoint file not found: {path_to_checkpoint}")
@@ -277,9 +218,10 @@ class Segmentator():
         self.model.eval()
         print(f"Model loaded from {path_to_checkpoint}")
 
+
     def test(self, path_to_test_data: str, batch_size=1, save_dir="test_results"):
         os.makedirs(save_dir, exist_ok=True)
-        test_dataset = SegmentDataset(path_to_test_data, 'test')
+        test_dataset = MassachusettsRoadsDataset(path_to_test_data, 'test')
         print(f"Test dataset size: {test_dataset.__len__()} samples")
 
         test_loader = data.DataLoader(
@@ -303,7 +245,7 @@ class Segmentator():
                 # print(x4.size())
 
                 probs = torch.sigmoid(predictions)
-                preds_binary = (probs > 0.05)
+                preds_binary = (probs > 0.5)
 
                 intersection = (preds_binary * y_batch).sum(dim=[1, 2, 3])
                 union = preds_binary.sum(dim=[1, 2, 3]) + y_batch.sum(dim=[1, 2, 3]) - intersection
