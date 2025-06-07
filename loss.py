@@ -13,9 +13,6 @@ class NoiseRobustDiceLoss(nn.Module):
         self.epsilon = epsilon
     
     def forward(self, predictions, targets):
-        # Убеждаемся, что predictions в [0,1]
-        predictions = torch.clamp(predictions, 0.0, 1.0)
-        
         predictions = predictions.view(-1)
         targets = targets.view(-1)
         
@@ -34,10 +31,10 @@ class MSSDMPALoss(nn.Module):
     """
     def __init__(self, gamma=1.5, epsilon=1e-5, 
                  bce_weight=1.0, dice_weight=1.0,
-                 final_weight=1.0, multiscale_weight=0.4):
+                 final_weight=1.0, multiscale_weight=1.0):
         super(MSSDMPALoss, self).__init__()
         
-        self.bce_loss = nn.BCELoss()
+        self.bce_loss = nn.BCEWithLogitsLoss()
         self.nr_dice_loss = NoiseRobustDiceLoss(gamma=gamma, epsilon=epsilon)
         
         self.bce_weight = bce_weight
@@ -52,7 +49,9 @@ class MSSDMPALoss(nn.Module):
         total_loss = 0.0
         
         final_bce = self.bce_loss(final_output, targets)
-        final_dice = self.nr_dice_loss(final_output, targets)
+
+        final_sigmoid = torch.sigmoid(final_output) 
+        final_dice = self.nr_dice_loss(final_sigmoid, targets)
         final_loss = self.bce_weight * final_bce + self.dice_weight * final_dice
         
         total_loss += self.final_weight * final_loss
@@ -64,7 +63,9 @@ class MSSDMPALoss(nn.Module):
             target_map = F.interpolate(targets, size=target_size, mode='nearest')
             
             ms_bce = self.bce_loss(pred_map, target_map)
-            ms_dice = self.nr_dice_loss(pred_map, target_map)
+            
+            ms_sigmoid = torch.sigmoid(pred_map)
+            ms_dice = self.nr_dice_loss(ms_sigmoid, target_map)
             ms_loss = self.bce_weight * ms_bce + self.dice_weight * ms_dice
             
             multiscale_loss += ms_loss

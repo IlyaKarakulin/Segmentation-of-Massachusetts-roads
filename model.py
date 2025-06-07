@@ -1,7 +1,6 @@
 import os
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
 import torch.nn.functional as F
@@ -31,7 +30,7 @@ class Segmentator():
         print(f"Всего параметров: {total_params:,}")
 
         self.writer = None 
-        self.num_workers = 6
+        self.num_workers = 4
         self.pin_memory = True
 
 
@@ -46,11 +45,15 @@ class Segmentator():
                                           num_workers=self.num_workers, pin_memory=self.pin_memory)
         
 
-        self.optimizer = optim.AdamW(params=self.model.parameters(), lr=lr, weight_decay=0)
+        self.optimizer = optim.Adam(params=self.model.parameters(), lr=lr, weight_decay=1e-4)
 
         loss = MSSDMPALoss()
 
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=6)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            self.optimizer, 
+            milestones=[60, 120], 
+            gamma=0.1
+        )
 
         log_dir = f'meta_data/HRNet/MSSDMPA_Net-bs={batch_size}*{acc_step}'
         os.makedirs(log_dir, exist_ok=True)
@@ -69,7 +72,7 @@ class Segmentator():
             train_metrics = self.run_epoch(count_epoch, dataloader_train, self.optimizer, loss, acc_step, is_train=True)
             val_metrics = self.run_epoch(count_epoch, dataloader_val, None, loss, acc_step, is_train=False)
 
-            self.scheduler.step(val_metrics['Val_Loss'])
+            # self.scheduler.step(val_metrics['Val_Loss'])
             current_lr = self.optimizer.param_groups[0]['lr']
             self.writer.add_scalar('Learning Rate', current_lr, count_epoch)
 
@@ -145,7 +148,7 @@ class Segmentator():
             recall_arr = []
            
             with torch.no_grad():
-                probs = predictions[0]
+                probs = torch.sigmoid(predictions[0])
                 preds_binary = (probs > 0.5).float()
                 
                 intersection = (preds_binary * y_batch).sum(dim=[1,2,3])

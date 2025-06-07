@@ -67,7 +67,7 @@ class DPMG(nn.Module):
         x = self.relu2(self.bn2(self.conv2(x)))
         x = self.relu3(self.bn3(self.conv3(x)))
         x = self.final_conv(x)
-        x = self.sigmoid(x)
+        # x = self.sigmoid(x)
         return x
 
 
@@ -135,34 +135,31 @@ class DAMIP(nn.Module):
     """Dynamic Attention Map guided Index Pooling"""
     def __init__(self, in_channels, out_channels):
         super(DAMIP, self).__init__()
-        
         self.index_pooling = IndexPooling(kernel_size=2)
-        
         self.bottleneck = nn.Conv2d(in_channels * 4, out_channels, 1)
-        
         self.final_conv = nn.Conv2d(out_channels, out_channels, 7, padding=3)
         self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        
+
     def forward(self, feature_map, prob_map):
-        pooled_features = self.index_pooling(feature_map)      # g̃i-1: (B, C*4, H/2, W/2)
-        pooled_probs = self.index_pooling(prob_map)            # m̃i-1: (B, 1*4, H/2, W/2)
+
+        pooled_features = self.index_pooling(feature_map)  # (B, C*4, H/2, W/2)
+        pooled_probs = self.index_pooling(prob_map)        # (B, 4, H/2, W/2)
         
         B, C_feat, H, W = pooled_features.shape
-        B, C_prob, H, W = pooled_probs.shape
+        original_channels = C_feat // 4
         
-        pooled_probs_expanded = pooled_probs.repeat(1, C_feat // C_prob, 1, 1)
+        pooled_probs_expanded = pooled_probs.repeat(1, original_channels, 1, 1)
         
-        # hi-1 = IP(gi-1) · IP(mi-1) + IP(gi-1)
         attention_features = pooled_features * pooled_probs_expanded + pooled_features
         
-        attention_features = self.bottleneck(attention_features)
-        
-        out = self.final_conv(attention_features)
+        out = self.bottleneck(attention_features)
+        out = self.final_conv(out)
         out = self.bn(out)
         out = self.relu(out)
         
         return out
+
 
 
 #! ------ Dynamic Attention Map guided Spatial and Channel Attention (DAMSCA)------
@@ -219,71 +216,63 @@ class Decoder(nn.Module):
         x = self.conv1(x)           # 2C -> C
         x = self.conv2(x)           # C -> C/2
         x = self.conv3(x)           # C/2 -> 1
-        x = self.sigmoid(x)         # [0, 1]
+        # x = self.sigmoid(x)         # [0, 1]
         return x
     
 
 #! ------ Multi-Scale Supervised Dilated Multiple-Path Attention Network -----
 
 class MSSDMPA_Net(nn.Module):
-    """Multi-Scale Supervised Dilated Multiple-Path Attention Network"""
     def __init__(self, input_channels=3, base_channels=64):
         super(MSSDMPA_Net, self).__init__()
-        
         self.base_channels = base_channels
         
         self.input_conv = nn.Conv2d(input_channels, base_channels, 7, stride=2, padding=3)
         self.input_bn = nn.BatchNorm2d(base_channels)
         self.input_relu = nn.ReLU(inplace=True)
         
+        path_channels = [base_channels, base_channels*2, base_channels*4, base_channels*8]
+        
         self.encoders = nn.ModuleList()
         self.damip_modules = nn.ModuleList()
         self.damsca_modules = nn.ModuleList()
         
-        path_channels = [base_channels, base_channels*2, base_channels*4, base_channels*8]
-        
-        for i in range(4):  # i = 0, 1, 2, 3
-            num_channels = path_channels[i]
-
-            self.encoders.append(SingleLevelEncoder(num_channels, i+1))
+        for i in range(4):
+            self.encoders.append(SingleLevelEncoder(path_channels[i], i+1))
             
             if i > 0:
-                damip_in_channels = path_channels[i-1]
-                damip_out_channels = path_channels[i]
-
-                self.damip_modules.append(DAMIP(damip_in_channels, damip_out_channels))
+                self.damip_modules.append(DAMIP(path_channels[i-1], path_channels[i]))
             
-            self.damsca_modules.append(DAMSCA(num_channels))
+            self.damsca_modules.append(DAMSCA(path_channels[i]))
         
-        total_channels = sum(path_channels)  # C+2C+4C+8C = 15C
+        total_channels = sum(path_channels)  # 15C
         self.decoder = Decoder(total_channels)
-        
+    
     def forward(self, x):
         prob_maps = []
         damip_outputs = []
         damsca_outputs = []
         
-        current_damip_out = self.input_relu(self.input_bn(self.input_conv(x)))
+        g1 = self.input_relu(self.input_bn(self.input_conv(x)))
         
         for i in range(4):
-            if i > 0:
+            if i == 0:
+                current_input = g1
+            else:
                 prev_prob_map = prob_maps[i-1]
-                current_damip_out = self.damip_modules[i-1](current_damip_out, prev_prob_map)
+                current_input = self.damip_modules[i-1](damip_outputs[i-1], prev_prob_map)
             
-            damip_outputs.append(current_damip_out)
+            damip_outputs.append(current_input)
             
-            features, prob_map = self.encoders[i](current_damip_out)
+            features, prob_map = self.encoders[i](current_input)
             prob_maps.append(prob_map)
             
             damsca_out = self.damsca_modules[i](features, prob_map)
             damsca_outputs.append(damsca_out)
         
         fdec = torch.cat(damsca_outputs, dim=1)
-
         mout = self.decoder(fdec)
-        # print()
-        # print("!!!!", mout)
-
-        # return mout, damsca_outputs[0], damsca_outputs[1], damsca_outputs[2], damsca_outputs[3]
+        
         return mout, prob_maps[0], prob_maps[1], prob_maps[2], prob_maps[3]
+
     

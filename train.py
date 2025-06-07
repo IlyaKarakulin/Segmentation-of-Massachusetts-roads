@@ -15,6 +15,8 @@ path_to_val = './data_tiff/val'
 
 model = Segmentator('cuda:1')
 
+model.load_model("/home/i.karakulin/Segmentation-of-Massachusetts-roads/meta_data/models/last.pth")
+
 model.train(path_to_train=path_to_train,
             path_to_val=path_to_val,
             batch_size=16,
