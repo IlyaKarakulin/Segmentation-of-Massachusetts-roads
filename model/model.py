@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score
 
 from dataset import MassachusettsRoadsDataset
-from mmsdmpaNet import dsmpnet
+from mssdmpaNet import dsmpnet
 from loss import y_bce_loss
 
 
