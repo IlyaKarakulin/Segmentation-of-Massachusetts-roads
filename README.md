@@ -1,7 +1,4 @@
 # Road-Segmentation
 
-gdown --fuzzy https://drive.google.com/file/d/1agOSDzKZZWi6dYRYnpw33rQ_GpC2eEQp/view?usp=sharing -O data.zip
-
-watch -n 0.1 nvidia-smi
-
-tensorboard --logdir=meta_data
+Implementation of MSSDMPA-Net. The model code is taken from the [author's github](https://github.com/shirshabose/MSSDMPA-Net) \
+[Article about the model](https://arxiv.org/pdf/2302.09411)
